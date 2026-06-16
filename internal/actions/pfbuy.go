@@ -41,6 +41,12 @@ type BuyConfig struct {
 	RPCEndpoint          string
 	SecondaryRPCEndpoint string
 	PrivateKeyBase58     string
+
+	// Risk / exit controls (used by the sell side and the dashboard).
+	DryRun        bool    // when true, transactions are built but never submitted
+	TakeProfitPct float64 // auto-sell when a position is up at least this percent
+	StopLossPct   float64 // auto-sell when a position is down at least this percent
+	PollSeconds   int     // how often the exit monitor re-checks prices
 }
 
 type BuyManager struct {
@@ -50,6 +56,7 @@ type BuyManager struct {
 	keypair            solana.PrivateKey
 	purchasedTokens    sync.Map
 	transactionSender  chan *solana.Transaction
+	positions          *PositionStore
 }
 
 var (
@@ -70,6 +77,7 @@ func InitializeBuyModule(config BuyConfig) {
 			secondaryRpcClient: rpc.New(config.SecondaryRPCEndpoint),
 			keypair:            privateKey,
 			transactionSender:  make(chan *solana.Transaction, 100),
+			positions:          NewPositionStore(),
 		}
 
 		go buyManager.processTransactions()
@@ -79,6 +87,11 @@ func InitializeBuyModule(config BuyConfig) {
 
 func (bm *BuyManager) processTransactions() {
 	for tx := range bm.transactionSender {
+		if bm.config.DryRun {
+			log.Printf("[dry-run] transaction built but NOT submitted")
+			continue
+		}
+
 		opts := rpc.TransactionOpts{
 			SkipPreflight: true,
 		}
@@ -248,6 +261,18 @@ func (bm *BuyManager) processNewMint(signal BuySignal) error {
 		}
 		log.Printf("Purchase transactions sent for %s", signal.MintAccount)
 		bm.purchasedTokens.Store(signal.MintAccount, true)
+
+		// Track the position so the exit monitor and dashboard can manage it.
+		entryPrice, _ := bm.priceForBondingCurve(signal.BondingCurve)
+		bm.positions.Add(Position{
+			Mint:                   signal.MintAccount,
+			BondingCurve:           signal.BondingCurve,
+			AssociatedBondingCurve: signal.AssociatedBondingCurve,
+			TokensHeld:             positionTokenSize,
+			EntryPriceLamports:     entryPrice,
+			OpenedAt:               time.Now(),
+		})
+		RecordEvent(fmt.Sprintf("BUY %s", short(signal.MintAccount)))
 	} else {
 		log.Printf("Already purchased %s", signal.MintAccount)
 	}
