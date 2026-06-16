@@ -96,6 +96,16 @@ All endpoints and secrets come from environment variables — nothing is hardcod
 
 **Never commit a real key.** Use a dedicated, low-value wallet — treat anything configured here as disposable.
 
+## Try the dashboard (no setup)
+
+To see the terminal dashboard immediately — no wallet, RPC, or Geyser endpoint — run it in **demo mode**, which seeds sample positions and simulates live price movement, take-profit / stop-loss exits, and new detections:
+
+```bash
+DEMO=true go run ./cmd        # Windows cmd:  set DEMO=true && go run ./cmd
+```
+
+Type `sell 1` (or `sell <mint>`) to exit a position by hand, or `quit` to stop.
+
 ## Build & run
 
 ```bash

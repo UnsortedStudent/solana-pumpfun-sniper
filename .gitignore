@@ -1,8 +1,10 @@
 # Go build output
 /zednine
 /cmd/cmd
+sniper.exe
 *.exe
 *.test
+*.log
 
 # Secrets / local config — never commit
 .env

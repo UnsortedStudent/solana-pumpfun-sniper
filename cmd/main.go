@@ -11,6 +11,18 @@ import (
 )
 
 func main() {
+	// Send framework logs to a file so they never garble the live dashboard.
+	if f, err := os.OpenFile("sniper.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		log.SetOutput(f)
+	}
+
+	// DEMO mode: simulated data, no wallet/RPC/Geyser needed - just `DEMO=true go run ./cmd`.
+	if os.Getenv("DEMO") == "true" {
+		actions.StartDemo()
+		ui.Run("DEMO - simulated data (no wallet/RPC/Geyser needed)")
+		return
+	}
+
 	// DryRun defaults ON for safety; set DRY_RUN=false to submit real transactions.
 	dryRun := os.Getenv("DRY_RUN") != "false"
 
@@ -40,8 +52,12 @@ func main() {
 		}
 	}()
 
-	// Terminal dashboard — blocks until you type "quit".
-	ui.Run(dryRun)
+	mode := "LIVE - submitting real transactions"
+	if dryRun {
+		mode = "DRY-RUN - building but NOT submitting transactions"
+	}
+	// Terminal dashboard - blocks until you type "quit".
+	ui.Run(mode)
 }
 
 // mustEnv returns the value of the named environment variable, or exits with a

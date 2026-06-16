@@ -189,6 +189,9 @@ func short(s string) string {
 
 // Positions returns the live position store (nil if the buy module isn't initialized).
 func Positions() *PositionStore {
+	if demoStore != nil {
+		return demoStore
+	}
 	if buyManager == nil {
 		return nil
 	}
@@ -197,6 +200,14 @@ func Positions() *PositionStore {
 
 // Sell triggers a manual sell of an open position by mint.
 func Sell(mint string) error {
+	if demoStore != nil {
+		if _, ok := demoStore.Get(mint); !ok {
+			return fmt.Errorf("no open position for %s", mint)
+		}
+		demoStore.Remove(mint)
+		RecordEvent(fmt.Sprintf("SELL submitted %s", short(mint)))
+		return nil
+	}
 	if buyManager == nil {
 		return fmt.Errorf("buy module not initialized")
 	}

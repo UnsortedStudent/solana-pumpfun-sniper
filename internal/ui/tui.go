@@ -15,27 +15,25 @@ import (
 
 // Run starts the dashboard: a render loop in the background and a blocking command
 // reader on the foreground. It returns only when the user quits.
-func Run(dryRun bool) {
-	go renderLoop(dryRun)
+func Run(mode string) {
+	enableVT()    // make ANSI escape codes work in the Windows console
+	render(mode)  // paint the first frame immediately
+	go renderLoop(mode)
 	readCommands()
 }
 
-func renderLoop(dryRun bool) {
+func renderLoop(mode string) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		render(dryRun)
+		render(mode)
 	}
 }
 
-func render(dryRun bool) {
+func render(mode string) {
 	var b strings.Builder
 	b.WriteString("\033[2J\033[H") // clear screen + move cursor home
 
-	mode := "LIVE — submitting real transactions"
-	if dryRun {
-		mode = "DRY-RUN — building but NOT submitting transactions"
-	}
 	b.WriteString("==============================================================\n")
 	b.WriteString("  Solana pump.fun Sniper\n")
 	b.WriteString("  Mode: " + mode + "\n")
