@@ -10,11 +10,13 @@ import (
 // (take-profit / stop-loss) and display it on the dashboard.
 type Position struct {
 	Mint                   string
+	Name                   string
+	Symbol                 string
 	BondingCurve           string
 	AssociatedBondingCurve string
 	TokensHeld             uint64
-	EntryPriceLamports     float64 // lamports of SOL per token at entry
-	LastPriceLamports      float64 // most recent observed price (updated by the exit monitor)
+	EntryPriceLamports     float64 // entry reference value: bonding-curve price OR market cap (SOL), per source
+	LastPriceLamports      float64 // latest reference value (exit monitor / live trades)
 	PnLPct                 float64 // most recent profit/loss percent vs entry
 	OpenedAt               time.Time
 }

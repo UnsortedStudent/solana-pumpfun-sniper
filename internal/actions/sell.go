@@ -187,31 +187,15 @@ func short(s string) string {
 
 // --- exported helpers used by the dashboard / entry point ---
 
-// Positions returns the live position store (nil if the buy module isn't initialized).
+// Positions returns the dashboard's active position store (nil if no session running).
 func Positions() *PositionStore {
-	if demoStore != nil {
-		return demoStore
+	if activeStore != nil {
+		return activeStore
 	}
 	if buyManager == nil {
 		return nil
 	}
 	return buyManager.positions
-}
-
-// Sell triggers a manual sell of an open position by mint.
-func Sell(mint string) error {
-	if demoStore != nil {
-		if _, ok := demoStore.Get(mint); !ok {
-			return fmt.Errorf("no open position for %s", mint)
-		}
-		demoStore.Remove(mint)
-		RecordEvent(fmt.Sprintf("SELL submitted %s", short(mint)))
-		return nil
-	}
-	if buyManager == nil {
-		return fmt.Errorf("buy module not initialized")
-	}
-	return buyManager.SellPosition(mint)
 }
 
 // StartExitMonitor launches the take-profit / stop-loss monitor loop.

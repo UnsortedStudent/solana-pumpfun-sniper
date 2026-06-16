@@ -1,5 +1,5 @@
-// Package ui renders a simple terminal dashboard for the sniper: open positions
-// with live P/L, a recent-activity feed, and a manual "sell" command.
+// Package ui renders the terminal dashboard: a live launches feed, open positions
+// with P/L, a recent-activity log, and buy/sell commands.
 package ui
 
 import (
@@ -13,11 +13,11 @@ import (
 	"zednine/internal/actions"
 )
 
-// Run starts the dashboard: a render loop in the background and a blocking command
-// reader on the foreground. It returns only when the user quits.
+// Run starts the dashboard: an immediate paint, a 1s render loop, and a blocking
+// command reader. It returns only when the user quits.
 func Run(mode string) {
-	enableVT()    // make ANSI escape codes work in the Windows console
-	render(mode)  // paint the first frame immediately
+	enableVT()   // make ANSI escape codes work in the Windows console
+	render(mode) // paint the first frame immediately
 	go renderLoop(mode)
 	readCommands()
 }
@@ -32,29 +32,52 @@ func renderLoop(mode string) {
 
 func render(mode string) {
 	var b strings.Builder
-	b.WriteString("\033[2J\033[H") // clear screen + move cursor home
+	b.WriteString("\033[2J\033[H") // clear screen + cursor home
 
-	b.WriteString("==============================================================\n")
+	b.WriteString("==================================================================\n")
 	b.WriteString("  Solana pump.fun Sniper\n")
-	b.WriteString("  Mode: " + mode + "\n")
-	b.WriteString("==============================================================\n\n")
+	b.WriteString("  " + mode + "\n")
+	b.WriteString("==================================================================\n")
+	b.WriteString("  COMMANDS:  buy <#|addr>   sell <#|addr>   help   quit\n")
+	b.WriteString("------------------------------------------------------------------\n")
 
-	b.WriteString("OPEN POSITIONS\n")
-	b.WriteString(fmt.Sprintf("  %-3s %-14s %-12s %-8s\n", "#", "MINT", "HELD", "P/L"))
-	positions := actions.Positions()
-	var list []actions.Position
-	if positions != nil {
-		list = positions.List()
-	}
-	if len(list) == 0 {
-		b.WriteString("  (none yet — waiting for the monitor to detect a launch)\n")
+	// --- live launches ---
+	b.WriteString("\nLIVE LAUNCHES (newest first - buy by #)\n")
+	b.WriteString(fmt.Sprintf("  %-3s %-10s %-20s %10s %5s\n", "#", "SYMBOL", "NAME", "MCAP(SOL)", "AGE"))
+	launches := actions.RecentLaunches()
+	if len(launches) == 0 {
+		b.WriteString("  (waiting for launches...)\n")
 	} else {
-		for i, p := range list {
-			b.WriteString(fmt.Sprintf("  %-3d %-14s %-12d %+7.1f%%\n",
-				i+1, short(p.Mint), p.TokensHeld, p.PnLPct))
+		for i, l := range launches {
+			if i >= 8 {
+				break
+			}
+			b.WriteString(fmt.Sprintf("  %-3d %-10s %-20s %10.1f %4ds\n",
+				i+1, cell(l.Symbol, 10), cell(l.Name, 20), l.MarketCapSol, int(time.Since(l.At).Seconds())))
 		}
 	}
 
+	// --- open positions ---
+	b.WriteString("\nOPEN POSITIONS (sell by #)\n")
+	b.WriteString(fmt.Sprintf("  %-3s %-10s %-16s %8s\n", "#", "SYMBOL", "MINT", "P/L"))
+	var list []actions.Position
+	if p := actions.Positions(); p != nil {
+		list = p.List()
+	}
+	if len(list) == 0 {
+		b.WriteString("  (none - buy a launch above, or: buy <address>)\n")
+	} else {
+		for i, p := range list {
+			sym := p.Symbol
+			if sym == "" {
+				sym = "-"
+			}
+			b.WriteString(fmt.Sprintf("  %-3d %-10s %-16s %+7.1f%%\n",
+				i+1, cell(sym, 10), short(p.Mint), p.PnLPct))
+		}
+	}
+
+	// --- activity ---
 	b.WriteString("\nRECENT ACTIVITY\n")
 	events := actions.RecentEvents()
 	if len(events) == 0 {
@@ -65,7 +88,7 @@ func render(mode string) {
 		}
 	}
 
-	b.WriteString("\nCommands:  sell <#|mint>   |   quit\n> ")
+	b.WriteString("\n> ")
 	fmt.Print(b.String())
 }
 
@@ -80,44 +103,75 @@ func readCommands() {
 		case "quit", "exit", "q":
 			fmt.Println("Shutting down.")
 			os.Exit(0)
+		case "help", "h":
+			fmt.Println("commands:  buy <launch#|address>  |  sell <position#|address>  |  quit")
+		case "buy":
+			if len(fields) < 2 {
+				fmt.Println("usage: buy <launch#|mint-address>")
+				continue
+			}
+			mint := resolveLaunch(fields[1])
+			if mint == "" {
+				mint = fields[1] // treat as a pasted address
+			}
+			if err := actions.Buy(mint); err != nil {
+				fmt.Printf("buy failed: %v\n", err)
+			} else {
+				fmt.Printf("opened position in %s\n", short(mint))
+			}
 		case "sell":
 			if len(fields) < 2 {
-				fmt.Println("usage: sell <#|mint>")
+				fmt.Println("usage: sell <position#|mint-address>")
 				continue
 			}
-			mint := resolveMint(fields[1])
+			mint := resolvePosition(fields[1])
 			if mint == "" {
-				fmt.Println("no matching open position")
-				continue
+				mint = fields[1]
 			}
-			if err := actions.Sell(mint); err != nil {
+			if err := actions.SellHeld(mint); err != nil {
 				fmt.Printf("sell failed: %v\n", err)
 			} else {
-				fmt.Printf("sell submitted for %s\n", mint)
+				fmt.Printf("closed position in %s\n", short(mint))
 			}
 		default:
-			fmt.Printf("unknown command: %s\n", fields[0])
+			fmt.Printf("unknown command: %s (try 'help')\n", fields[0])
 		}
 	}
 }
 
-// resolveMint accepts either a 1-based row number from the dashboard or a full mint
-// address and returns the matching open position's mint (empty if none).
-func resolveMint(target string) string {
-	positions := actions.Positions()
-	if positions == nil {
-		return ""
-	}
-	list := positions.List()
+// resolveLaunch maps a 1-based launch row number or a mint address to a mint.
+func resolveLaunch(target string) string {
+	list := actions.RecentLaunches()
 	if n, err := strconv.Atoi(target); err == nil {
 		if n >= 1 && n <= len(list) {
 			return list[n-1].Mint
 		}
 		return ""
 	}
-	for _, p := range list {
-		if p.Mint == target {
-			return p.Mint
+	for _, l := range list {
+		if l.Mint == target {
+			return l.Mint
+		}
+	}
+	return ""
+}
+
+// resolvePosition maps a 1-based position row number or a mint address to a mint.
+func resolvePosition(target string) string {
+	p := actions.Positions()
+	if p == nil {
+		return ""
+	}
+	list := p.List()
+	if n, err := strconv.Atoi(target); err == nil {
+		if n >= 1 && n <= len(list) {
+			return list[n-1].Mint
+		}
+		return ""
+	}
+	for _, pos := range list {
+		if pos.Mint == target {
+			return pos.Mint
 		}
 	}
 	return ""
@@ -128,4 +182,20 @@ func short(s string) string {
 		return s
 	}
 	return s[:4] + ".." + s[len(s)-4:]
+}
+
+// cell strips control characters and truncates to n runes for safe column display
+// (token names are user-supplied and may contain junk).
+func cell(s string, n int) string {
+	out := make([]rune, 0, n)
+	for _, r := range s {
+		if r < 32 || r == 127 {
+			continue
+		}
+		out = append(out, r)
+		if len(out) >= n {
+			break
+		}
+	}
+	return string(out)
 }

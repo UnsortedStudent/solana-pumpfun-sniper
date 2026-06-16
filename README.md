@@ -1,134 +1,124 @@
 # Solana pump.fun Sniper (Go)
 
-A low-latency Go service that detects newly created [pump.fun](https://pump.fun) tokens on Solana the moment they launch, filters them by on-chain social signals, buys within milliseconds, then **manages each position with take-profit / stop-loss exits** — all from a live **terminal dashboard**.
+A real-time [pump.fun](https://pump.fun) launch monitor and trading dashboard in Go. It streams newly created tokens the moment they launch, shows them in a live terminal dashboard, and lets you open/close positions and track P/L — with two interchangeable data sources and the full on-chain buy/sell engine included.
 
-It streams transaction data from a validator over the **Geyser gRPC** interface (rather than polling RPC), pulls each new token's metadata from **IPFS**, and only acts on launches that meet configurable quality filters.
-
-> **Safety:** `DRY_RUN` defaults to **on** — the bot builds and prices everything but submits **no** real transactions until you explicitly set `DRY_RUN=false`.
+> **Zero setup:** by default it streams **real launches** from PumpPortal's free WebSocket — no wallet, RPC, or paid endpoint needed. Point it at your own **Geyser gRPC** endpoint for the low-latency path when you want it.
 
 ---
 
-## Pipeline
+## Quick start
 
-```
-                         Solana Validator
-                               │
-                   Geyser gRPC stream (transactions)
-                               │
-                               ▼
-      ┌──────────────────────────────────────────────┐
-      │              transaction_monitor               │
-      │  • subscribe to the pump.fun program           │
-      │  • find token-creation transactions            │
-      │  • decode mint + bonding-curve accounts        │
-      │  • extract IPFS hash, fetch token metadata     │
-      └──────────────────────────────────────────────┘
-                               │  BuySignal
-                               ▼
-      ┌──────────────────────────────────────────────┐
-      │              actions / filters                 │
-      │  require website + X (Twitter) + Telegram      │
-      └──────────────────────────────────────────────┘
-                               │  filtered BuySignal
-                               ▼
-      ┌──────────────────────────────────────────────┐
-      │              actions / buy manager             │
-      │  • build pump.fun buy instruction              │
-      │  • priority fee + concurrent attempts          │
-      │  • record an open Position                     │
-      └──────────────────────────────────────────────┘
-                               │  Position
-                               ▼
-      ┌──────────────────────────────────────────────┐
-      │          actions / exit monitor + sell         │
-      │  • re-price each position from bonding curve   │
-      │  • auto-sell on take-profit / stop-loss        │
-      │  • manual sell from the dashboard              │
-      └──────────────────────────────────────────────┘
-                               │
-                               ▼
-                     terminal dashboard (ui)
+```bash
+go run ./cmd
 ```
 
-1. **Monitor** (`internal/transaction_monitor`) opens a Geyser gRPC subscription to the pump.fun program, identifies token-creation events, decodes the mint/bonding-curve/metadata accounts, extracts the IPFS hash, and fetches the token metadata (local IPFS node first, then public gateways concurrently).
-2. **Filter** (`internal/actions/filters.go`) only forwards launches that publish a website, an `x.com` profile, and a `t.me` channel (each toggleable).
-3. **Buy** (`internal/actions/pfbuy.go`) builds the pump.fun `buy` instruction (priority fee + compute-unit limit + ATA creation), submits concurrent `skip_preflight` attempts, de-duplicates mints, and **records an open position**.
-4. **Manage / Sell** (`internal/actions/sell.go`) re-prices every open position from its bonding-curve reserves and **auto-sells on a configurable take-profit or stop-loss**, building the pump.fun `sell` instruction (the mirror of the buy). Positions can also be sold manually from the dashboard.
-5. **Dashboard** (`internal/ui/tui.go`) renders open positions with live P/L and a recent-activity feed, and accepts a `sell <#|mint>` command.
+That connects to the free live feed and opens the dashboard. In it:
+
+```
+COMMANDS:  buy <#|addr>   sell <#|addr>   help   quit
+```
+
+- `buy 1` — open a position in launch #1 (or `buy <mint-address>` to paste any token)
+- `sell 1` — close position #1 (or `sell <mint-address>`)
+- `quit` — exit
+
+No internet/Go handy? `DEMO=true go run ./cmd` runs it on simulated data.
+
+## Data sources
+
+| `SOURCE` | What it does |
+| -------- | ------------ |
+| `pumpportal` *(default)* | Streams real pump.fun launches from PumpPortal's free WebSocket. No wallet, RPC, or key required. |
+| `geyser` | Streams from your own **Geyser gRPC** endpoint (`GEYSER_GRPC_URL`) — the low-latency, production path. Most public RPCs don't expose Geyser; low-latency providers do. |
+
+```bash
+SOURCE=geyser GEYSER_GRPC_URL=your-geyser-host:10000 go run ./cmd
+```
+
+## Dashboard
+
+```
+==================================================================
+  Solana pump.fun Sniper
+  LIVE - real launches via PumpPortal (free, no setup)
+==================================================================
+  COMMANDS:  buy <#|addr>   sell <#|addr>   help   quit
+------------------------------------------------------------------
+LIVE LAUNCHES (newest first - buy by #)
+  #   SYMBOL     NAME                  MCAP(SOL)   AGE
+  1   HUMANS     Return To Humans           28.0    0s
+  ...
+OPEN POSITIONS (sell by #)
+  #   SYMBOL     MINT                  P/L
+  1   ORYK       2297..pump          +12.4%
+RECENT ACTIVITY
+  02:07:50  BUY ORYK
+```
+
+Open positions track **live P/L** from real market-cap updates (the feed subscribes to each held token's trades). Dashboard buy/sell is paper-tracked on live data; real on-chain execution runs through the configured trading path below.
+
+## On-chain trading engine
+
+The repo also contains the full low-latency **buy/sell engine** (the Geyser path):
+
+1. **Monitor** (`internal/transaction_monitor`) — Geyser gRPC subscription to the pump.fun program; decodes mint/bonding-curve accounts and pulls token metadata from **IPFS**.
+2. **Filter** (`internal/actions/filters.go`) — only forwards launches with a website + `x.com` + `t.me` (each toggleable).
+3. **Buy** (`internal/actions/pfbuy.go`) — builds the pump.fun `buy` instruction (priority fee + compute-unit limit + ATA creation) and submits concurrent `skip_preflight` attempts.
+4. **Manage / Sell** (`internal/actions/sell.go`) — re-prices positions from bonding-curve reserves and auto-sells on take-profit / stop-loss, building the pump.fun `sell` instruction (mirror of the buy).
+
+`DRY_RUN` defaults to **on** — transactions are built but never submitted until you set `DRY_RUN=false` with a funded wallet + RPC.
 
 ## Tech stack
 
-- **Language:** Go (goroutines + channels for the concurrent pipeline)
-- **Streaming:** gRPC (`google.golang.org/grpc`) against a Geyser endpoint; generated bindings in `proto/`
-- **Solana:** [`github.com/gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go) for keys, instructions, and RPC
-- **Other:** `mr-tron/base58`, standard-library HTTP/JSON for IPFS, stdlib-only terminal UI
+- **Language:** Go (goroutines + channels)
+- **Live feed:** `gorilla/websocket` against PumpPortal's API
+- **Streaming (Geyser):** `google.golang.org/grpc`; generated bindings in `proto/`
+- **Solana:** [`github.com/gagliardetto/solana-go`](https://github.com/gagliardetto/solana-go)
+- **UI:** stdlib-only terminal dashboard (ANSI), Windows VT support
 
 ## Project structure
 
 ```
-cmd/main.go                              # entry point: wires the pipeline + dashboard
+cmd/main.go                  # entry point: mode + data-source selection, dashboard
+internal/feed/
+  pumpportal.go              # free live launch feed (WebSocket) — default source
 internal/transaction_monitor/
-  monitor.go                             # Geyser subscription + token-creation detection
-  ipfs.go                                # IPFS metadata fetching (local node + gateways)
+  monitor.go, ipfs.go        # Geyser gRPC source + IPFS metadata
 internal/actions/
-  filters.go                             # social-signal eligibility filter
-  pfbuy.go                               # pump.fun buy construction & submission
-  positions.go                           # concurrency-safe open-position store + activity feed
-  sell.go                                # pump.fun sell + take-profit/stop-loss exit monitor
+  session.go                 # launches store, paper buy/sell, live P/L
+  positions.go               # concurrency-safe position store + activity feed
+  filters.go                 # social-signal eligibility filter
+  pfbuy.go, sell.go          # on-chain pump.fun buy/sell + exit monitor
+  demo.go                    # simulated data for DEMO mode
 internal/ui/
-  tui.go                                 # terminal dashboard (positions, P/L, manual sell)
-proto/                                   # generated Geyser gRPC bindings
+  tui.go                     # terminal dashboard + commands
+proto/                       # generated Geyser gRPC bindings
 ```
 
 ## Configuration
 
-All endpoints and secrets come from environment variables — nothing is hardcoded. See `.env.example`:
+Everything is configured via environment variables — nothing is hardcoded. See `.env.example`:
 
-| Variable             | Default | Description                                          |
-| -------------------- | ------- | ---------------------------------------------------- |
-| `RPC_ENDPOINT`       | —       | Solana RPC endpoint for submitting transactions      |
-| `GEYSER_GRPC_URL`    | —       | Geyser gRPC streaming endpoint (`host:port`)         |
-| `WALLET_PRIVATE_KEY` | —       | Base58-encoded wallet secret key (use a test wallet) |
-| `DRY_RUN`            | `true`  | Build but never submit transactions (safety default) |
-| `TAKE_PROFIT_PCT`    | `50`    | Auto-sell when a position is up at least this %       |
-| `STOP_LOSS_PCT`      | `40`    | Auto-sell when a position is down at least this %     |
-| `POLL_SECONDS`       | `3`     | How often the exit monitor re-prices positions       |
+| Variable             | Default        | Description                                                     |
+| -------------------- | -------------- | -------------------------------------------------------------- |
+| `SOURCE`             | `pumpportal`   | Live data source: `pumpportal` (free) or `geyser`              |
+| `DEMO`               | `false`        | Run on simulated data (no network needed)                      |
+| `GEYSER_GRPC_URL`    | —              | Geyser gRPC endpoint (`host:port`) when `SOURCE=geyser`         |
+| `RPC_ENDPOINT`       | —              | Solana RPC endpoint (for the on-chain trading engine)          |
+| `WALLET_PRIVATE_KEY` | —              | Base58 wallet secret key — use a dedicated, disposable wallet  |
+| `DRY_RUN`            | `true`         | Build but never submit transactions (safety default)           |
+| `TAKE_PROFIT_PCT`    | `50`           | Auto-sell when a position is up at least this %                 |
+| `STOP_LOSS_PCT`      | `40`           | Auto-sell when a position is down at least this %               |
+| `POLL_SECONDS`       | `3`            | How often the exit monitor re-prices positions                 |
 
-**Never commit a real key.** Use a dedicated, low-value wallet — treat anything configured here as disposable.
+**Never commit a real key.**
 
-## Try the dashboard (no setup)
+## Scope & limitations (kept honest)
 
-To see the terminal dashboard immediately — no wallet, RPC, or Geyser endpoint — run it in **demo mode**, which seeds sample positions and simulates live price movement, take-profit / stop-loss exits, and new detections:
-
-```bash
-DEMO=true go run ./cmd        # Windows cmd:  set DEMO=true && go run ./cmd
-```
-
-Type `sell 1` (or `sell <mint>`) to exit a position by hand, or `quit` to stop.
-
-## Build & run
-
-```bash
-go build ./...
-
-export RPC_ENDPOINT="https://your-rpc"
-export GEYSER_GRPC_URL="your-geyser-host:10000"
-export WALLET_PRIVATE_KEY="your_base58_secret_key"
-# DRY_RUN defaults to true — leave it until you've tested.
-
-go run ./cmd
-```
-
-The dashboard takes over the terminal. Type `sell 1` (or `sell <mint>`) to exit a position manually, or `quit` to stop. Requires Go 1.23+ and a reachable Geyser gRPC endpoint (low-latency providers expose one; most public RPCs do not).
-
-## Scope & limitations
-
-The full **detect → filter → buy → manage/sell** loop plus a dashboard is implemented. Known simplifications (kept intentionally honest):
-
-- **Position size on sell** uses a fixed token amount rather than querying the wallet's exact token-account balance after the buy lands.
-- **Slippage:** the sell sets `min_sol_output = 0` (accepts any output). Add a slippage floor before live use.
-- **Account layouts** for the pump.fun `buy`/`sell` instructions are pinned to a known program version; verify them against the current on-chain program before trading real funds.
-- No persistence — positions live in memory for the session.
+- The dashboard's buy/sell **paper-tracks** positions on live market-cap data; **real on-chain execution** runs through the Geyser + wallet path (instruction builders in `pfbuy.go`/`sell.go`, `DRY_RUN` on by default).
+- Sell sizing uses a fixed token amount rather than querying the exact token-account balance; `min_sol_output` is `0` (no slippage floor) — set one before live trading.
+- pump.fun `buy`/`sell` account layouts are pinned to a known program version — verify against the current on-chain program before trading real funds.
+- No persistence — state lives in memory for the session.
 
 ## ⚠️ Disclaimer
 

@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/gagliardetto/solana-go v1.11.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/mr-tron/base58 v1.2.0
 	golang.org/x/sys v0.24.0
 	google.golang.org/grpc v1.65.0
