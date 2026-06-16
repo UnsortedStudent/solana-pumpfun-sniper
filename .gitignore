@@ -1,0 +1,13 @@
+# Go build output
+/zednine
+/cmd/cmd
+*.exe
+*.test
+
+# Secrets / local config — never commit
+.env
+.env.local
+config.json
+*.key
+*.keypair
+wallet*.json
