@@ -79,7 +79,7 @@ func render(mode string) {
 
 	// --- open positions ---
 	b.WriteString("\nOPEN POSITIONS (sell by #)\n")
-	b.WriteString(fmt.Sprintf("  %-3s %-10s %-14s %6s %8s\n", "#", "SYMBOL", "MINT", "SOL", "P/L"))
+	b.WriteString(fmt.Sprintf("  %-3s %-10s %-14s %6s %8s %9s\n", "#", "SYMBOL", "MINT", "SOL", "P/L", "VALUE"))
 	var list []actions.Position
 	if p := actions.Positions(); p != nil {
 		list = p.List()
@@ -92,8 +92,9 @@ func render(mode string) {
 			if sym == "" {
 				sym = "-"
 			}
-			b.WriteString(fmt.Sprintf("  %-3d %-10s %-14s %6.2f %+7.1f%%\n",
-				i+1, cell(sym, 10), short(p.Mint), p.SolSpent, p.PnLPct))
+			value := p.SolSpent * (1 + p.PnLPct/100) * actions.SolUSD()
+			b.WriteString(fmt.Sprintf("  %-3d %-10s %-14s %6.2f %+7.1f%% %9s\n",
+				i+1, cell(sym, 10), short(p.Mint), p.SolSpent, p.PnLPct, usd(value)))
 		}
 	}
 
