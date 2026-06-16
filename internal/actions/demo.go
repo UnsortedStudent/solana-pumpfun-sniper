@@ -28,6 +28,7 @@ func StartDemo() {
 			Name:               s.name,
 			Symbol:             s.symbol,
 			TokensHeld:         positionTokenSize,
+			SolSpent:           float64(1 + i),
 			EntryPriceLamports: entry,
 			LastPriceLamports:  entry * (1 + s.pnl/100),
 			PnLPct:             s.pnl,

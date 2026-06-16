@@ -15,6 +15,7 @@ type Position struct {
 	BondingCurve           string
 	AssociatedBondingCurve string
 	TokensHeld             uint64
+	SolSpent               float64 // SOL committed to this position (for sizing / P/L display)
 	EntryPriceLamports     float64 // entry reference value: bonding-curve price OR market cap (SOL), per source
 	LastPriceLamports      float64 // latest reference value (exit monitor / live trades)
 	PnLPct                 float64 // most recent profit/loss percent vs entry

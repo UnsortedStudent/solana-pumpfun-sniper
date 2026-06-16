@@ -96,12 +96,15 @@ func UpdateMarketCap(mint string, mcap float64) {
 // Buy opens a position for a token — either a launch row or a pasted mint address.
 // Positions are tracked on live market-cap data; on-chain execution runs through the
 // configured trading path (wallet + RPC) when enabled.
-func Buy(mint string) error {
+func Buy(mint string, solAmount float64) error {
 	if activeStore == nil {
 		return fmt.Errorf("session not started")
 	}
 	if mint == "" {
 		return fmt.Errorf("empty mint address")
+	}
+	if solAmount <= 0 {
+		solAmount = 1
 	}
 	if _, ok := activeStore.Get(mint); ok {
 		return fmt.Errorf("already holding %s", short(mint))
@@ -112,11 +115,12 @@ func Buy(mint string) error {
 		Name:               name,
 		Symbol:             symbol,
 		TokensHeld:         positionTokenSize,
+		SolSpent:           solAmount,
 		EntryPriceLamports: mcap,
 		LastPriceLamports:  mcap,
 		OpenedAt:           time.Now(),
 	})
-	RecordEvent(fmt.Sprintf("BUY %s", labelFor(symbol, mint)))
+	RecordEvent(fmt.Sprintf("BUY %.2f SOL %s", solAmount, labelFor(symbol, mint)))
 	if SubscribeTrades != nil {
 		SubscribeTrades(mint)
 	}

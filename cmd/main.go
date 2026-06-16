@@ -16,6 +16,8 @@ func main() {
 		log.SetOutput(f)
 	}
 
+	actions.StartPriceFeed() // keep SOL/USD fresh for the dashboard
+
 	// DEMO mode: simulated data, zero setup -> `DEMO=true go run ./cmd`.
 	if os.Getenv("DEMO") == "true" {
 		actions.StartDemo()
